@@ -11,11 +11,11 @@ const app = express();
 
 /* -------------------- App & Security -------------------- */
 app.set('x-powered-by', false);
-app.set('trust proxy', 1); // for deployments behind proxies (Render/Heroku/etc)
+app.set('trust proxy', 1);
 
 app.use(
   helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' }, // safe for APIs/static
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
 app.use(morgan('dev'));
@@ -24,10 +24,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 /* -------------------- CORS -------------------- */
-/* Support either:
-   - CORS_ORIGIN="http://localhost:5173"
-   - CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
-*/
 function parseOrigins(str) {
   return (str || '')
     .split(',')
@@ -39,20 +35,25 @@ const originList = new Set([
   ...parseOrigins(process.env.CORS_ORIGINS),
 ]);
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // Allow Postman / same-origin (no Origin header)
-      if (!origin) return cb(null, true);
-      if (originList.size === 0 || originList.has(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked: ${origin}`));
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
-// NOTE: No app.options('*', ...) on Express 5 — CORS middleware handles preflights
+// Ensure proxies/CDNs vary by Origin
+app.use((req, res, next) => {
+  res.setHeader('Vary', 'Origin');
+  next();
+});
+
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // non-browser tools / same-origin
+    if (originList.size === 0 || originList.has(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // explicit preflight handling
 
 /* -------------------- Rate Limiting -------------------- */
 const limiter = rateLimit({
@@ -83,7 +84,6 @@ app.use((req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  // CORS origin errors or generic
   const status = err.status || (err.message?.startsWith('CORS blocked') ? 403 : 500);
   console.error('[ERROR]', err.message);
   res.status(status).json({ error: err.message || 'Server Error' });
@@ -107,7 +107,6 @@ async function start() {
     });
     console.log('MongoDB connected');
 
-    // In dev, sync indexes to keep schema & DB aligned (helps remove stray indexes)
     if ((process.env.NODE_ENV || 'development') !== 'production') {
       try {
         const User = require('./models/User');
