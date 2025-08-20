@@ -9,7 +9,6 @@ const UserSchema = new Schema(
   { timestamps: true }
 );
 
-// Minimal safe projection helper
 UserSchema.methods.public = function () {
   return { id: this._id, email: this.email, displayName: this.displayName };
 };

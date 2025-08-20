@@ -13,7 +13,6 @@ const CounterSchema = new Schema(
   { timestamps: true }
 );
 
-// 👇 add this line to replace the bad (userId,label) idea:
 CounterSchema.index({ userId: 1, name: 1 }, { unique: true });
 
 module.exports = model('Counter', CounterSchema);

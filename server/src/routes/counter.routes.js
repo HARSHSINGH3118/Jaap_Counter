@@ -9,9 +9,9 @@ const {
   syncEvents
 } = require('../controllers/counter.controller');
 
-const auth = require('../middleware/auth');
+const requireAuth = require('../middleware/auth');
 
-router.use(auth); // protect everything below
+router.use(requireAuth);
 
 router.get('/', getCounters);
 router.post('/', createCounter);

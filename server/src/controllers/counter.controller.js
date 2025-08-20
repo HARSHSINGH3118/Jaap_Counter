@@ -5,7 +5,6 @@ const { Types } = require('mongoose');
 
 const getUserId = (req) => req.user.uid;
 
-/* recompute totals + streak from events */
 async function recomputeCounter(uid, counterId) {
   const uidObj = new Types.ObjectId(uid);
   const cidObj = typeof counterId === 'string' ? new Types.ObjectId(counterId) : counterId;
@@ -133,7 +132,7 @@ exports.syncEvents = async (req, res, next) => {
         });
         acceptedOpIds.push(e.opId);
         if (e.counterId) affected.add(e.counterId);
-      } catch { /* duplicate opId */ }
+      } catch {}
     }
 
     const summaries = await Promise.all([...affected].map(cid => recomputeCounter(uid, cid)));

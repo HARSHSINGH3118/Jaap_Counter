@@ -1,26 +1,8 @@
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const User = require('../models/User');
+const { signAccess, signRefresh, verifyRefresh } = require('../utils/jwt');
 
-// helpers
-function signAccessToken(user) {
-  return jwt.sign(
-    { uid: user._id, email: user.email },
-    process.env.JWT_SECRET,
-    { expiresIn: '15m' }
-  );
-}
-
-function signRefreshToken(user) {
-  return jwt.sign(
-    { uid: user._id, email: user.email, tokenId: uuidv4() },
-    process.env.JWT_REFRESH_SECRET,
-    { expiresIn: '7d' }
-  );
-}
-
-// controllers
 exports.register = async (req, res, next) => {
   try {
     const { email, password, displayName } = req.body;
@@ -32,8 +14,8 @@ exports.register = async (req, res, next) => {
     const hash = await bcrypt.hash(password, 10);
     const user = await User.create({ email, hash, displayName });
 
-    const access = signAccessToken(user);
-    const refresh = signRefreshToken(user);
+    const access = signAccess({ uid: user._id, email: user.email });
+    const refresh = signRefresh({ uid: user._id, email: user.email, tokenId: uuidv4() });
 
     res.json({ access, refresh, user: { id: user._id, email: user.email, displayName: user.displayName } });
   } catch (err) {
@@ -50,8 +32,8 @@ exports.login = async (req, res, next) => {
     const ok = await bcrypt.compare(password, user.hash);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const access = signAccessToken(user);
-    const refresh = signRefreshToken(user);
+    const access = signAccess({ uid: user._id, email: user.email });
+    const refresh = signRefresh({ uid: user._id, email: user.email, tokenId: uuidv4() });
 
     res.json({ access, refresh, user: { id: user._id, email: user.email, displayName: user.displayName } });
   } catch (err) {
@@ -64,11 +46,11 @@ exports.refreshToken = async (req, res, next) => {
     const { refresh } = req.body;
     if (!refresh) return res.status(400).json({ error: 'Missing refresh token' });
 
-    const payload = jwt.verify(refresh, process.env.JWT_REFRESH_SECRET);
+    const payload = verifyRefresh(refresh);
     const user = await User.findById(payload.uid);
     if (!user) return res.status(401).json({ error: 'Invalid refresh token' });
 
-    const access = signAccessToken(user);
+    const access = signAccess({ uid: user._id, email: user.email });
     res.json({ access });
   } catch (err) {
     next(err);
@@ -84,7 +66,6 @@ exports.me = async (req, res, next) => {
     next(err);
   }
 };
-
 
 exports.logout = async (req, res, next) => {
   try {

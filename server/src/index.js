@@ -9,103 +9,77 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 
-/* -------------------- App & Security -------------------- */
+/* App & Security */
 app.set('x-powered-by', false);
 app.set('trust proxy', 1);
-
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-  })
-);
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(morgan('dev'));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-/* -------------------- CORS -------------------- */
+/* CORS */
 function parseOrigins(str) {
-  return (str || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return (str || '').split(',').map(s => s.trim()).filter(Boolean);
 }
-const originList = new Set([
+const allowList = new Set([
   ...parseOrigins(process.env.CORS_ORIGIN),
   ...parseOrigins(process.env.CORS_ORIGINS),
 ]);
 
-// Make caches/proxies vary by Origin
-app.use((req, res, next) => {
-  res.setHeader('Vary', 'Origin');
-  next();
-});
+app.use((req, res, next) => { res.setHeader('Vary', 'Origin'); next(); });
 
 const corsOptions = {
-  origin: (origin, cb) => {
+  origin(origin, cb) {
     if (!origin) return cb(null, true);
-    if (originList.size === 0 || originList.has(origin)) return cb(null, true);
+    const allowPreview = origin.endsWith('.vercel.app');
+    const allowExact = allowList.size === 0 || allowList.has(origin);
+    if (allowExact || allowPreview) return cb(null, true);
     return cb(new Error(`CORS blocked: ${origin}`));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
 };
 
 app.use(cors(corsOptions));
-// Do NOT use app.options('*', ...) on Express 5.
-// If you ever need it, use: app.options('(.*)', cors(corsOptions));
+// app.options('(.*)', cors(corsOptions));
 
-/* -------------------- Rate Limiting -------------------- */
+/* Rate Limit (skip preflight) */
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
 });
 app.use(limiter);
 
-/* -------------------- Health -------------------- */
+/* Health */
 app.get('/health', (req, res) => {
-  res.json({
-    ok: true,
-    service: 'jaap-counter-api',
-    ts: Date.now(),
-    env: process.env.NODE_ENV || 'development',
-  });
+  res.json({ ok: true, service: 'jaap-counter-api', ts: Date.now(), env: process.env.NODE_ENV || 'development' });
 });
 
-/* -------------------- Routes -------------------- */
+/* Routes */
 app.use('/auth', require('./routes/auth.routes'));
 app.use('/counters', require('./routes/counter.routes'));
 
-/* -------------------- 404 & Error Handling -------------------- */
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not Found' });
-});
-
+/* 404 & Errors */
+app.use((req, res) => { res.status(404).json({ error: 'Not Found' }); });
 app.use((err, req, res, next) => {
-  const status = err.status || (err.message?.startsWith('CORS blocked') ? 403 : 500);
+  const status = err.status || (String(err.message || '').startsWith('CORS blocked') ? 403 : 500);
   console.error('[ERROR]', err.message);
   res.status(status).json({ error: err.message || 'Server Error' });
 });
 
-/* -------------------- DB Connect & Server Start -------------------- */
+/* DB & Start */
 const PORT = Number(process.env.PORT || 5000);
 const MONGO_URI = process.env.MONGO_URI;
 
 async function start() {
-  if (!MONGO_URI) {
-    console.error('Missing MONGO_URI in .env');
-    process.exit(1);
-  }
-
+  if (!MONGO_URI) { console.error('Missing MONGO_URI in .env'); process.exit(1); }
   try {
     mongoose.set('strictQuery', true);
-    await mongoose.connect(MONGO_URI, {
-      autoIndex: true,
-      serverSelectionTimeoutMS: 10000,
-    });
+    await mongoose.connect(MONGO_URI, { autoIndex: true, serverSelectionTimeoutMS: 10000 });
     console.log('MongoDB connected');
 
     if ((process.env.NODE_ENV || 'development') !== 'production') {
@@ -113,35 +87,26 @@ async function start() {
         const User = require('./models/User');
         const Counter = require('./models/Counter');
         const Event = require('./models/Event');
-        await Promise.allSettled([
-          User.syncIndexes(),
-          Counter.syncIndexes(),
-          Event.syncIndexes(),
-        ]);
+        await Promise.allSettled([User.syncIndexes(), Counter.syncIndexes(), Event.syncIndexes()]);
         console.log('Indexes synchronized (dev mode)');
-      } catch (idxErr) {
-        console.warn('Index sync warning:', idxErr.message);
+      } catch (e) {
+        console.warn('Index sync warning:', e.message);
       }
     }
 
     app.listen(PORT, () => {
-      const allowed = originList.size ? Array.from(originList).join(', ') : '(any origin)';
+      const allowed = allowList.size ? Array.from(allowList).join(', ') : '(any origin + *.vercel.app)';
       console.log(`API running on http://localhost:${PORT}`);
-      console.log(`CORS allowed origins: ${allowed}`);
+      console.log(`CORS allowed origins: ${allowed} (+ *.vercel.app)`);
     });
   } catch (e) {
     console.error('DB connection failed:', e.message);
     process.exit(1);
   }
 }
-
 start();
 
-/* -------------------- Process Safety -------------------- */
 process.on('unhandledRejection', (r) => console.error('UNHANDLED REJECTION', r));
-process.on('uncaughtException', (e) => {
-  console.error('UNCAUGHT EXCEPTION', e);
-  process.exit(1);
-});
+process.on('uncaughtException', (e) => { console.error('UNCAUGHT EXCEPTION', e); process.exit(1); });
 
 module.exports = app;
