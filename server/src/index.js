@@ -35,7 +35,7 @@ const originList = new Set([
   ...parseOrigins(process.env.CORS_ORIGINS),
 ]);
 
-// Ensure proxies/CDNs vary by Origin
+// Make caches/proxies vary by Origin
 app.use((req, res, next) => {
   res.setHeader('Vary', 'Origin');
   next();
@@ -43,7 +43,7 @@ app.use((req, res, next) => {
 
 const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // non-browser tools / same-origin
+    if (!origin) return cb(null, true);
     if (originList.size === 0 || originList.has(origin)) return cb(null, true);
     return cb(new Error(`CORS blocked: ${origin}`));
   },
@@ -53,7 +53,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // explicit preflight handling
+// Do NOT use app.options('*', ...) on Express 5.
+// If you ever need it, use: app.options('(.*)', cors(corsOptions));
 
 /* -------------------- Rate Limiting -------------------- */
 const limiter = rateLimit({
